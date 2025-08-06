@@ -352,30 +352,53 @@ def main(reeds_path, inputs_case):
         indat['tech'] = indat.coolingwatertech
 
     ### NOTE: New addition for columns AO:AR, AW:AX in the plant file
-    ad = indat[["tech", "r", "ctt", "resource_region", "cap", "TC_WIN", retscen,
-                "StartYear", "IsExistUnit", "HeatRate", "T_VOM", "T_FOM",
-                "T_CCSROV", "T_CCSF", "T_CCSV", "T_CCSHR", "T_CCSCAPA", "T_CCSLOC"]].copy() 
+    ad = indat[
+        [
+            "tech",
+            "r",
+            "ctt",
+            "resource_region",
+            "cap",
+            "TC_WIN",
+            retscen,
+            "StartYear",
+            "IsExistUnit",
+            "HeatRate",
+            "T_VOM",
+            "T_FOM",
+            "T_CCSROV",
+            "T_CCSF",
+            "T_CCSV",
+            "T_CCSHR",
+            "T_CCSCAPA",
+            "T_CCSLOC",
+            "T_PID",
+            "T_UID",
+        ]
+    ].copy()
 
     # Rename columns in ad
     rename = {
-        'tech'   : 'TECH',
-        'r'      : 'r',
-        'ctt'    : 'ctt',
-        'resource_region' : 'resource.region',
-        'cap'    : 'Summer.capacity',
-        'TC_WIN' : 'Winter.capacity',
-        retscen  : 'RetireYear',
-        'StartYear' : 'onlineyear',
-        'IsExistUnit' : 'EXIST',
-        'HeatRate' : 'HR',
-        'T_VOM'  : 'VOM',
-        'T_FOM'  : 'FOM',
-        'T_CCSROV' : 'CCS_Retro_OvernightCost',
-        'T_CCSF' : 'CCS_Retro_FOM',
-        'T_CCSV' : 'CCS_Retro_VOM',
-        'T_CCSHR': 'CCS_Retro_HR',
-        'T_CCSCAPA': 'CCS_Retro_CapAdjust',
-        'T_CCSLOC': 'CCS_Retro_LocFactor'
+        "tech": "TECH",
+        "r": "r",
+        "ctt": "ctt",
+        "resource_region": "resource.region",
+        "cap": "Summer.capacity",
+        "TC_WIN": "Winter.capacity",
+        retscen: "RetireYear",
+        "StartYear": "onlineyear",
+        "IsExistUnit": "EXIST",
+        "HeatRate": "HR",
+        "T_VOM": "VOM",
+        "T_FOM": "FOM",
+        "T_CCSROV": "CCS_Retro_OvernightCost",
+        "T_CCSF": "CCS_Retro_FOM",
+        "T_CCSV": "CCS_Retro_VOM",
+        "T_CCSHR": "CCS_Retro_HR",
+        "T_CCSCAPA": "CCS_Retro_CapAdjust",
+        "T_CCSLOC": "CCS_Retro_LocFactor",
+        "T_PID": "T_PID",
+        "T_UID": "T_UID",
     }
     ad.rename(columns=rename, inplace=True)
 
@@ -411,11 +434,42 @@ def main(reeds_path, inputs_case):
                'RetireYear'] += coalretireyrs
 
     # Group up similar generators
-    dat = df.groupby([
-        'TECH', 'r', 'HR', 'resource.region', 'onlineyear', 
-        'RetireYear', 'VOM', 'FOM',"CCS_Retro_OvernightCost", "CCS_Retro_FOM", 
-        "CCS_Retro_VOM", "CCS_Retro_HR", "CCS_Retro_CapAdjust", "CCS_Retro_LocFactor",
-    ])[['Summer.capacity','Winter.capacity']].sum().reset_index()
+    # First create a unique identifier for each unit
+    df["unit_id"] = df["T_PID"].astype(str) + "_" + df["T_UID"].astype(str)
+
+    # Group by characteristics and sum capacities while collecting unit IDs
+    grouped = (
+        df.groupby(
+            [
+                "TECH",
+                "r",
+                "HR",
+                "resource.region",
+                "onlineyear",
+                "RetireYear",
+                "VOM",
+                "FOM",
+                "CCS_Retro_OvernightCost",
+                "CCS_Retro_FOM",
+                "CCS_Retro_VOM",
+                "CCS_Retro_HR",
+                "CCS_Retro_CapAdjust",
+                "CCS_Retro_LocFactor",
+            ]
+        )
+        .agg(
+            {
+                "Summer.capacity": "sum",
+                "Winter.capacity": "sum",
+                "unit_id": lambda x: "|".join(x.astype(str)),  # Collect all unit IDs
+                "T_PID": lambda x: "|".join(x.astype(str)),  # Collect all PIDs
+                "T_UID": lambda x: "|".join(x.astype(str)),  # Collect all UIDs
+            }
+        )
+        .reset_index()
+    )
+
+    dat = grouped
 
     # Remove 'others' category
     dat = dat[dat.TECH != 'others'].copy()
@@ -444,7 +498,57 @@ def main(reeds_path, inputs_case):
         tdat_coal = grouping(nBin, dat_coal, 'HR', minSpread=mindev).df
 
     tdat = pd.concat([tdat_non_coal, tdat_coal], ignore_index=True, axis=0)
-    
+
+    # Create detailed unit-to-bin mapping
+    unit_mapping = []
+    for _, row in tdat.iterrows():
+        # Split the collected unit IDs and create individual mapping rows
+        unit_ids = row["unit_id"].split("|")
+        pids = row["T_PID"].split("|")
+        uids = row["T_UID"].split("|")
+
+        for unit_id, pid, uid in zip(unit_ids, pids, uids):
+            unit_mapping.append(
+                {
+                    "T_PID": pid,
+                    "T_UID": uid,
+                    "unit_id": unit_id,
+                    "TECH": row["TECH"],
+                    "r": row["r"],
+                    "bin": row["bin"],
+                    "HR": row["HR"],
+                    "onlineyear": row["onlineyear"],
+                    "RetireYear": row["RetireYear"],
+                    "VOM": row["VOM"],
+                    "FOM": row["FOM"],
+                    "Summer.capacity_bin": row[
+                        "Summer.capacity"
+                    ],  # Total capacity for this bin
+                    "Winter.capacity_bin": row["Winter.capacity"],
+                }
+            )
+
+    unit_mapping_df = pd.DataFrame(unit_mapping)
+    unit_mapping_df["T_PID"] = unit_mapping_df["T_PID"].astype(int)
+
+    # Merge with original unit data to get individual unit capacities
+    unit_mapping_final = pd.merge(
+        unit_mapping_df,
+        indat[["T_PID", "T_UID", "cap", "TC_WIN"]].rename(
+            columns={"cap": "Summer.capacity_unit", "TC_WIN": "Winter.capacity_unit"}
+        ),
+        on=["T_PID", "T_UID"],
+        how="left",
+    )
+
+    # Save the unit-to-bin mapping
+    unit_mapping_final.to_csv(
+        os.path.join(inputs_case, "unit_to_hintage_mapping.csv"), index=False
+    )
+
+    # Clean up tdat by removing unit tracking columns
+    tdat = tdat.drop(columns=["unit_id", "T_PID", "T_UID"])
+
     # calculate the maximum hintage number, to be used in b_inputs.gms, and export it
     max_hintage_number = tdat['bin'].max()
     max_hintage_number_text = f'scalar max_hintage_number "--number-- the maximum number of bins used in this ReEDS run" /{max_hintage_number}/ ;'
