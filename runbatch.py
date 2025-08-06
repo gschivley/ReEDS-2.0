@@ -19,12 +19,12 @@ from input_processing import mcs_sampler as mcs
 
 # Assert core programs are accessible
 CORE_PROGRAMS = ["gams"]
-if not all(shutil.which(program) for program in CORE_PROGRAMS):
-    msg = (
-        "Programs needed to run reeds not accessible on the environment. "
-        f"Check that all the {CORE_PROGRAMS=} are accessible on the PATH."
-    )
-    raise ImportError(msg)
+# if not all(shutil.which(program) for program in CORE_PROGRAMS):
+#     msg = (
+#         "Programs needed to run reeds not accessible on the environment. "
+#         f"Check that all the {CORE_PROGRAMS=} are accessible on the PATH."
+#     )
+#     raise ImportError(msg)
 
 #%% Constants
 LINUXORMAC = True if os.name == 'posix' else False
